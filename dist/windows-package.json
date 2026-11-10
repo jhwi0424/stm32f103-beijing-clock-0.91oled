@@ -1,6 +1,6 @@
 {
-  "version": "2.0.1",
-  "installer_sha256": "e64a1a0c82d75a79b045c3db6f02697b3ee3e6ea043a63e4cf1a60b487a9c818",
-  "source_sha256": "13d4dc4716c3ed9fe1851210390e82eb5240a8e4364ff1345dba6c69fe889047",
+  "version": "2.0.2",
+  "installer_sha256": "72a322fe80741d3c9639a1ba42dc3e16d555b3af2ca301f2bf2e9b99448ccdb4",
+  "source_sha256": "ac3e136af1ffb44142c51983f10c7511da9be890e8cdb3d688079b06bbddfeac",
   "runtime": "Windows PowerShell + .NET Framework; AnyCPU; no Python or network"
 }

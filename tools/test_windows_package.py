@@ -50,10 +50,15 @@ class WindowsPackageTests(unittest.TestCase):
         self.app('--install','--install-root',app,'--startup-dir',startup,'--no-start')
         installed=app/'BeijingClockSync.exe';link=startup/'STM32 Beijing Clock USB Sync.lnk'
         self.assertEqual(installed.read_bytes(),self.exe.read_bytes());self.assertTrue(link.exists())
-        r=powershell(f'$s=(New-Object -ComObject WScript.Shell).CreateShortcut({psquote(link)}); [Console]::WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s.TargetPath))); [Console]::WriteLine([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s.Arguments)))')
-        self.assertEqual(r.returncode,0,r.stderr)
-        # Base64 avoids dependence on the user's console code page; no pywin32 needed.
-        lines=r.stdout.splitlines()
+        self.app('--inspect-shortcut','--shortcut',link)
+        # Verify persisted UTF-16 data independently, then inspect using the Unicode shell API.
+        raw=link.read_bytes()
+        # Shell links may store a full ANSI path plus Unicode PIDL components,
+        # rather than one contiguous UTF-16 absolute path.
+        self.assertIn(app.name.encode('utf-16le'),raw)
+        self.assertIn(installed.name.encode('utf-16le'),raw)
+        self.assertTrue(struct.unpack_from('<I',raw,20)[0]&0x80,'Unicode StringData flag missing')
+        lines=(self.folder/'setup-result.txt').read_text(encoding='utf-8').splitlines()
         self.assertEqual(Path(base64.b64decode(lines[0]).decode('utf-8')),installed)
         self.assertEqual(base64.b64decode(lines[1] if len(lines)>1 else '').decode('utf-8'),f'--watch --install-root "{app}"')
         self.app('--install','--install-root',app,'--startup-dir',startup,'--no-start')

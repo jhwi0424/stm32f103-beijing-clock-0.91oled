@@ -30,7 +30,7 @@ def build():
     target.write_bytes(body.replace('\r\n','\n').replace('\n','\r\n').encode('ascii'))
     # Keep the original double-click entry point identical, so existing users upgrade safely.
     (ROOT/'install_usb_autosync.cmd').write_bytes(target.read_bytes())
-    manifest={'version':'2.0.1','installer_sha256':hashlib.sha256(target.read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(source).hexdigest(),'runtime':'Windows PowerShell + .NET Framework; AnyCPU; no Python or network'}
+    manifest={'version':'2.0.2','installer_sha256':hashlib.sha256(target.read_bytes()).hexdigest(),'source_sha256':hashlib.sha256(source).hexdigest(),'runtime':'Windows PowerShell + .NET Framework; AnyCPU; no Python or network'}
     (target.parent/'windows-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
     print(f'{target.name}: {target.stat().st_size} bytes; SHA256 {manifest["installer_sha256"]}')
     return target

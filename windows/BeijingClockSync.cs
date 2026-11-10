@@ -14,6 +14,31 @@ using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
 namespace BeijingClock {
+    // Use the Unicode shell interface directly. WScript.Shell's late-bound setters
+    // can reject non-ACP paths on an English Windows installation.
+    [ComImport,Guid("00021401-0000-0000-C000-000000000046")]
+    class ShellLinkObject { }
+    [ComImport,Guid("000214F9-0000-0000-C000-000000000046"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IShellLinkW {
+        void GetPath([Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder path,int count,IntPtr findData,uint flags);
+        void GetIDList(out IntPtr list);
+        void SetIDList(IntPtr list);
+        void GetDescription([Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder text,int count);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string text);
+        void GetWorkingDirectory([Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder path,int count);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string path);
+        void GetArguments([Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder args,int count);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+        void GetHotkey(out short key);
+        void SetHotkey(short key);
+        void GetShowCmd(out int command);
+        void SetShowCmd(int command);
+        void GetIconLocation([Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder path,int count,out int index);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string path,int index);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string path,uint reserved);
+        void Resolve(IntPtr window,uint flags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
+    }
     public sealed class Device {
         public string Port;
         public string Identity;
@@ -143,7 +168,7 @@ namespace BeijingClock {
                         var synchronized=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         var warning=new Dictionary<string,long>(StringComparer.OrdinalIgnoreCase);
                         var watch=Stopwatch.StartNew();
-                        Log("START version=2.0.1 executable="+Self);
+                        Log("START version=2.0.2 executable="+Self);
                         do {
                             List<Device> ports;
                             try { ports=NativePorts.List(); }
@@ -186,18 +211,29 @@ namespace BeijingClock {
             if(String.Equals(Path.GetFullPath(Root),Path.GetFullPath(DefaultRoot),StringComparison.OrdinalIgnoreCase))
                 StopNamed("Local\\STM32BeijingClockStopV2","Local\\STM32BeijingClockUSBWatcherV2");
         }
-        static object ComGet(object obj,string member) {return obj.GetType().InvokeMember(member,BindingFlags.GetProperty,null,obj,null);}
-        static void ComSet(object obj,string member,object value) {obj.GetType().InvokeMember(member,BindingFlags.SetProperty,null,obj,new object[]{value});}
         static void Shortcut(string path,string target) {
-            object shell=Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));object link=null;
+            object obj=new ShellLinkObject();
             try {
-                link=shell.GetType().InvokeMember("CreateShortcut",BindingFlags.InvokeMethod,null,shell,new object[]{path});
-                ComSet(link,"TargetPath",target);ComSet(link,"Arguments","--watch --install-root \""+Root+"\"");ComSet(link,"WorkingDirectory",Path.GetDirectoryName(target));
-                ComSet(link,"Description","Synchronize the STM32 clock once on each USB connection.");ComSet(link,"WindowStyle",7);
-                link.GetType().InvokeMember("Save",BindingFlags.InvokeMethod,null,link,null);
-                if(!String.Equals((string)ComGet(link,"TargetPath"),target,StringComparison.OrdinalIgnoreCase) || !File.Exists(target))
+                var link=(IShellLinkW)obj;
+                link.SetPath(target);link.SetArguments("--watch --install-root \""+Root+"\"");
+                link.SetWorkingDirectory(Path.GetDirectoryName(target));
+                link.SetDescription("Synchronize the STM32 clock once on each USB connection.");link.SetShowCmd(7);
+                ((System.Runtime.InteropServices.ComTypes.IPersistFile)obj).Save(path,true);
+                if(!File.Exists(target) || !File.Exists(path))
                     throw new IOException("Startup shortcut verification failed.");
-            } finally {if(link!=null)Marshal.FinalReleaseComObject(link);Marshal.FinalReleaseComObject(shell);}
+            } finally {Marshal.FinalReleaseComObject(obj);}
+            string[] saved=ReadShortcut(path);
+            if(!String.Equals(saved[0],target,StringComparison.OrdinalIgnoreCase))throw new IOException("Saved startup target did not match.");
+        }
+        static string[] ReadShortcut(string path) {
+            object obj=new ShellLinkObject();
+            try {
+                ((System.Runtime.InteropServices.ComTypes.IPersistFile)obj).Load(path,0);
+                var link=(IShellLinkW)obj;var target=new StringBuilder(32768);var args=new StringBuilder(32768);
+                link.GetPath(target,target.Capacity,IntPtr.Zero,4); // SLGP_RAWPATH: do not resolve under a different user.
+                link.GetArguments(args,args.Capacity);
+                return new string[]{target.ToString(),args.ToString()};
+            } finally {Marshal.FinalReleaseComObject(obj);}
         }
         static void SafeRoot(string value) {
             string full=Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar);
@@ -256,17 +292,22 @@ namespace BeijingClock {
         [STAThread]
         public static int Main(string[] args) {
             try {
-                bool launch=true;string action="--watch";
+                bool launch=true;string action="--watch",shortcutToInspect=null;
                 for(int i=0;i<args.Length;i++) {
                     if(args[i]=="--install-root" && i+1<args.Length)Root=Path.GetFullPath(args[++i]);
                     else if(args[i]=="--startup-dir" && i+1<args.Length)Startup=Path.GetFullPath(args[++i]);
                     else if(args[i]=="--no-start")launch=false;
+                    else if(args[i]=="--shortcut" && i+1<args.Length)shortcutToInspect=args[++i];
                     else action=args[i];
                 }
                 if(action=="--install") {Install(launch);return 0;}
                 if(action=="--uninstall") {Uninstall();return 0;}
                 if(action=="--stop") {Stop();return 0;}
                 if(action=="--self-test") {SelfTest();return 0;}
+                if(action=="--inspect-shortcut") {
+                    string[] saved=ReadShortcut(shortcutToInspect);
+                    Result(Convert.ToBase64String(Encoding.UTF8.GetBytes(saved[0]))+Environment.NewLine+Convert.ToBase64String(Encoding.UTF8.GetBytes(saved[1])));return 0;
+                }
                 if(action=="--once")return Watch(true);
                 if(action=="--watch")return Watch(false);
                 throw new ArgumentException("Unknown action: "+action);

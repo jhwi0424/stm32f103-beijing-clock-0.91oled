@@ -1,0 +1,23 @@
+name: Windows offline installer
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test protocol, installer, paths, and standalone CMD
+        run: python tools/test_windows_package.py
+      - name: Require committed package to match its source
+        run: git diff --exit-code -- dist/ install_usb_autosync.cmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BeijingClock-Windows-offline-installer
+          path: |
+            dist/Install-BeijingClock.cmd
+            dist/windows-package.json
+            build/windows-package-tests.json
